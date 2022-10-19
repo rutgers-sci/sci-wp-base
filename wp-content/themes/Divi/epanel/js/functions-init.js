@@ -1,7 +1,7 @@
 /* <![CDATA[ */
 	var clearpath = ePanelSettings.clearpath;
 
-	jQuery(document).ready(function($){
+	jQuery(function($){
 		var editors = [];
 
 		function addEditorInstance(codeEditor, $element, config) {
@@ -62,7 +62,7 @@
 			}
 		});
 
-		$(".et-box-description").click(function(){
+		$('.et-box-description').on('click', function() {
 			var descheading = $(this).parent('.et-epanel-box').find(".et-box-title h3").html();
 			var desctext = $(this).parent('.et-epanel-box').find(".et-box-title .et-box-descr").html();
 
@@ -70,19 +70,19 @@
 
 			et_pb_center_modal( $( '.et-box-desc' ) );
 
-			$( '.et-lightbox-close' ).click( function() {
-				et_pb_close_modal( $( '#custom-lbox' ) );
+			$('.et-lightbox-close').on('click', function() {
+				et_pb_close_modal($('#custom-lbox'));
 			});
 		});
 
-		$(".et-defaults-button.epanel-reset").click(function(e) {
+		$('.et-defaults-button.epanel-reset').on('click', function(e) {
 			e.preventDefault();
 			$(".reset-popup-overlay, .defaults-hover").addClass('active');
 
 			et_pb_center_modal( $( '.defaults-hover' ) );
 		});
 
-		$( '.no' ).click( function() {
+		$('.no').on('click', function() {
 			et_pb_close_modal( $( '.reset-popup-overlay' ), 'no_remove' );
 
 			//clean the modal classes when animation complete
@@ -120,19 +120,84 @@
 					$checkbox.parents('.et-epanel-box').next().hide();
 				}
 			}
+
+			if ( 'divi_dynamic_css' === $checkbox.attr( 'id' ) || 'extra_dynamic_css' === $checkbox.attr( 'id' ) ) {
+				if ( ! value ) {
+					$checkbox.parents('.et-epanel-box').next().hide();
+					$checkbox.parents('.et-epanel-box').next().next().hide();
+				}
+			}
+
+			if ( 'divi_enable_jquery_body' === $checkbox.attr( 'id' ) || 'extra_enable_jquery_body' === $checkbox.attr( 'id' ) ) {
+				if ( ! value ) {
+					$checkbox.parents('.et-epanel-box').next().hide();
+					$checkbox.parents('.et-epanel-box').next().next().hide();
+				}
+			}
+
+			if ( 'divi_google_fonts_inline' === $checkbox.attr( 'id' ) || 'extra_google_fonts_inline' === $checkbox.attr( 'id' ) ) {
+				if ( ! value ) {
+					$checkbox.parents('.et-epanel-box').next().hide();
+				}
+			}
+
+			if ( 'divi_critical_css' === $checkbox.attr( 'id' ) || 'extra_critical_css' === $checkbox.attr( 'id' ) ) {
+				if ( ! value ) {
+					$checkbox.parents('.et-epanel-box').next().hide();
+				}
+			}
+
 		});
 
 		$('.et-box-content').on( 'click', '.et_pb_yes_no_button', function(e){
 			e.preventDefault();
+			// Fix for nested .et-box-content triggering checkboxes multiple times.
+			e.stopPropagation();
 
 			var $click_area = $(this),
-				$box_content = $click_area.parents('.et-box-content'),
+				$box_content = $click_area.closest('.et-box-content'),
 				$checkbox    = $box_content.find('input[type="checkbox"]'),
 				$state       = $box_content.find('.et_pb_yes_no_button');
 
 			if ( $state.parent().next().hasClass( 'et_pb_clear_static_css' ) ) {
 				$state = $state.add( $state.parent() );
 
+				if ( $checkbox.is( ':checked' ) ) {
+					$box_content.parent().next().hide();
+				} else {
+					$box_content.parent().next().show();
+				}
+			}
+
+			if ( 'divi_dynamic_css' === $checkbox.attr( 'id' ) || 'extra_dynamic_css' === $checkbox.attr( 'id' ) ) {
+				if ( $checkbox.is( ':checked' ) ) {
+					$box_content.parent().next().hide();
+					$box_content.parent().next().next().hide();
+				} else {
+					$box_content.parent().next().show();
+					$box_content.parent().next().next().show();
+				}
+			}
+
+			if ( 'divi_enable_jquery_body' === $checkbox.attr( 'id' ) || 'extra_enable_jquery_body' === $checkbox.attr( 'id' ) ) {
+				if ( $checkbox.is( ':checked' ) ) {
+					$box_content.parent().next().hide();
+					$box_content.parent().next().next().hide();
+				} else {
+					$box_content.parent().next().show();
+					$box_content.parent().next().next().show();
+				}
+			}
+
+			if ( 'divi_google_fonts_inline' === $checkbox.attr( 'id' ) || 'divi_google_fonts_inline' === $checkbox.attr( 'id' ) ) {
+				if ( $checkbox.is( ':checked' ) ) {
+					$box_content.parent().next().hide();
+				} else {
+					$box_content.parent().next().show();
+				}
+			}
+
+			if ( 'divi_critical_css' === $checkbox.attr( 'id' ) || 'extra_critical_css' === $checkbox.attr( 'id' ) ) {
 				if ( $checkbox.is( ':checked' ) ) {
 					$box_content.parent().next().hide();
 				} else {
@@ -152,13 +217,13 @@
 
 		var $save_message = $("#epanel-ajax-saving");
 
-		$('#epanel-save-top').click(function(e){
+		$('#epanel-save-top').on('click', function(e) {
 			e.preventDefault();
 
 			$('#epanel-save').trigger('click');
 		})
 
-		$('#epanel-save').click(function(){
+		$('#epanel-save').on('click', function() {
 			epanel_save( false, true );
 			return false;
 		});
@@ -198,7 +263,7 @@
 						},500);
 					}
 
-					if ( $.isFunction( callback ) ) {
+					if ( 'function' === typeof callback ) {
 						callback();
 					}
 				}
@@ -231,7 +296,7 @@
 						}, 500 );
 					}
 
-					if ( $.isFunction( callback ) ) {
+					if ( 'function' === typeof callback ) {
 						callback();
 					}
 				}
@@ -302,7 +367,7 @@
 			});
 		}
 
-		if ( typeof etCore !== 'undefined' ) {
+		if ( typeof etCore !== 'undefined' && typeof etCore.portability !== 'undefined' ) {
 			// Portability integration.
 			etCore.portability.save = function( callback ) {
 				epanel_save( callback, false );
@@ -310,8 +375,8 @@
 		}
 
 		function et_pb_center_modal( $modal ) {
-			var modal_height = $modal.outerHeight(),
-				modal_height_adjustment = 0 - ( modal_height / 2 );
+			var modal_height = $modal.outerHeight();
+			var modal_height_adjustment = (0 - (modal_height / 2)) + 'px';
 
 			$modal.css({
 				top : '50%',

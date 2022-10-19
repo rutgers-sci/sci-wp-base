@@ -1,5 +1,5 @@
 (function($){
-	$(document).ready( function(){
+	$(function(){
 		var user_agent = navigator.userAgent;
 		var is_opera_edge;
 		var browser = user_agent.match(/(opera|chrome|safari|firefox|msie|trident(?=\/))/i) || [];
@@ -18,10 +18,10 @@
 
 		// use navigator.appName as browser name if we were unable to get it from user_agent
 		if ( '' === browser_name ) {
-			if (!window.navigator.standalone) {
+			if ('standalone' in window.navigator && !window.navigator.standalone) {
 				browser_name = 'uiwebview';
 			} else {
-				browser_name = '' !== browser[0] ? browser[0] : navigator.appName;
+				browser_name = browser[0] && '' !== browser[0] ? browser[0] : navigator.appName;
 			}
 		}
 

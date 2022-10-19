@@ -27,6 +27,11 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 	/**
 	 * @inheritDoc
 	 */
+	public $custom_fields_scope = 'account';
+
+	/**
+	 * @inheritDoc
+	 */
 	public $name = 'SalesForce';
 
 	/**
@@ -52,9 +57,33 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 	public function __construct( $owner, $account_name = '' ) {
 		parent::__construct( $owner, $account_name );
 
-		$this->REDIRECT_URL = admin_url( 'admin.php?page=et_bloom_options', 'https' );
+		if ( 'builder' === $owner ) {
+			$this->REDIRECT_URL = add_query_arg( 'et-core-api-email-auth', 1, home_url( '', 'https' ) ); // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change prop name.
+		} else {
+			$this->REDIRECT_URL = admin_url( 'admin.php?page=et_bloom_options', 'https' ); // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change prop name.
+		}
 
 		$this->_set_base_url();
+	}
+
+	protected function _fetch_custom_fields( $list_id = '', $list = array() ) {
+		static $fields = null;
+
+		$this->response_data_key = 'fields';
+
+		$this->prepare_request( "{$this->BASE_URL}/services/data/v39.0/sobjects/Lead/describe" );
+
+		if ( is_null( $fields ) ) {
+			$fields = parent::_fetch_custom_fields( $list_id, $list );
+
+			foreach ( $fields as $index => $field ) {
+				if ( ! isset( $field['custom'] ) || ! $field['custom'] ) {
+					unset( $fields[ $index ] );
+				}
+			}
+		}
+
+		return $fields;
 	}
 
 	/**
@@ -71,8 +100,40 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 		return parent::fetch_subscriber_lists();
 	}
 
+	protected function _process_custom_fields( $args ) {
+		if ( ! isset( $args['custom_fields'] ) ) {
+			return $args;
+		}
+
+		$fields = $args['custom_fields'];
+
+		unset( $args['custom_fields'] );
+
+		foreach ( $fields as $field_id => $value ) {
+			if ( is_array( $value ) && $value ) {
+				// This is a multiple choice field (eg. checkbox, radio, select)
+				$value = array_values( $value );
+
+				if ( 'checkbox' === $this->data['custom_fields'][ $field_id ]['type'] ) {
+					$value = implode( ';', $value );
+				} else {
+					$value = array_pop( $value );
+				}
+			}
+
+			self::$_->array_set( $args, "custom_fields.{$field_id}", $value );
+		}
+
+		return $args;
+	}
+
 	public function _set_base_url() {
-		$this->BASE_URL = empty( $this->data['login_url'] ) ? '' : $this->data['login_url'];
+		// If we already have the `instance_url`, use it as the base API url.
+		if ( isset( $this->data['instance_url'] ) && ! empty( $this->data['instance_url'] ) ) {
+			$this->BASE_URL = untrailingslashit( $this->data['instance_url'] ); // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change prop name.
+		} else {
+			$this->BASE_URL = empty( $this->data['login_url'] ) ? '' : untrailingslashit( $this->data['login_url'] ); // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change prop name.
+		}
 	}
 
 	public function authenticate() {
@@ -86,31 +147,30 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 	 * @inheritDoc
 	 */
 	public function get_account_fields() {
-		// SalesForce supports OAuth for SSL websites so generate different fields in this case
-		if ( is_ssl() ) {
-			return array(
-				'organization_id' => array(
-					'label'        => esc_html__( 'Organization ID', 'et_core' ),
-					'not_required' => true,
-				),
-				'login_url'       => array(
-					'label' => esc_html__( 'Instance URL', 'et_core' ),
-				),
-				'api_key'         => array(
-					'label' => esc_html__( 'Consumer Key', 'et_core' ),
-				),
-				'client_secret'   => array(
-					'label' => esc_html__( 'Consumer Secret', 'et_core' ),
-				),
-			);
-
-		} else {
-			return array(
-				'organization_id' => array(
-					'label' => esc_html__( 'Organization ID', 'et_core' ),
-				),
-			);
-		}
+		return array(
+			// SalesForce supports OAuth for SSL websites so generate different fields in this case
+			'login_url'       => array(
+				'label'    => esc_html__( 'Instance URL', 'et_core' ),
+				'required' => 'https',
+				'show_if'  => array( 'function.protocol' => 'https' ),
+			),
+			'api_key'         => array(
+				'label'    => esc_html__( 'Consumer Key', 'et_core' ),
+				'required' => 'https',
+				'show_if'  => array( 'function.protocol' => 'https' ),
+			),
+			'client_secret'   => array(
+				'label'    => esc_html__( 'Consumer Secret', 'et_core' ),
+				'required' => 'https',
+				'show_if'  => array( 'function.protocol' => 'https' ),
+			),
+			// This has to be the last field because is the only one shown in both cases and
+			// CANCEL / SUBMIT buttons will be attached to it.
+			'organization_id' => array(
+				'label'        => esc_html__( 'Organization ID', 'et_core' ),
+				'required' => 'http',
+			),
+		);
 	}
 
 	/**
@@ -119,12 +179,36 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 	public function fetch_subscriber_lists() {
 		$this->_set_base_url();
 		// SalesForce supports 2 types of authentication: Simple and OAuth2
-		if ( isset( $this->data['api_key'] ) && isset( $this->data['client_secret'] ) ) {
-			// OAuth2
-			return $this->is_authenticated() ? $this->_fetch_subscriber_lists() : $this->authenticate();
-		} else if ( isset( $this->data['organization_id'] ) && '' !== $this->data['organization_id'] ) {
+		if ( isset( $this->data['api_key'], $this->data['client_secret'] ) && ! empty( $this->data['api_key'] ) && ! empty( $this->data['client_secret'] ) ) {
+
+			// Fetch lists if user already authenticated.
+			if ( $this->is_authenticated() ) {
+				return $this->_fetch_subscriber_lists();
+			}
+
+			$authenticated = $this->authenticate();
+			// If the authenticating process returns an array with redirect url to complete OAuth authorization.
+			if ( is_array( $authenticated ) ) {
+				return $authenticated;
+			}
+
+			if ( true === $authenticated ) {
+				// Need to reinitialize the OAuthHelper with the new data, to set the authorization header in the next request.
+				$urls               = array(
+					'access_token_url'  => $this->ACCESS_TOKEN_URL, // @phpcs:ignore -- No need to change the class property
+					'request_token_url' => $this->REQUEST_TOKEN_URL, // @phpcs:ignore -- No need to change the class property
+					'authorization_url' => $this->AUTHORIZATION_URL, // @phpcs:ignore -- No need to change the class property
+					'redirect_url'      => $this->REDIRECT_URL, // @phpcs:ignore -- No need to change the class property
+				);
+				$this->OAuth_Helper = new ET_Core_API_OAuthHelper( $this->data, $urls, $this->owner ); // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change the prop name.
+				return $this->_fetch_subscriber_lists();
+			}
+
+			return false;
+		} elseif ( isset( $this->data['organization_id'] ) && '' !== $this->data['organization_id'] ) {
 			// Simple
 			$this->data['is_authorized'] = 'true';
+			$this->data['lists']         = array( array( 'list_id' => 0, 'name' => 'WebToLead', 'subscribers_count' => 0 ) );
 
 			$this->save_data();
 
@@ -138,23 +222,40 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 	/**
 	 * @inheritDoc
 	 */
-	public function get_data_keymap( $keymap = array(), $custom_fields_key = '' ) {
-		$custom_fields_key = 'custom_fields';
-
+	public function get_data_keymap( $keymap = array() ) {
 		$keymap = array(
-			'list'       => array(
+			'list'              => array(
 				'list_id'           => 'Id',
 				'name'              => 'Name',
 				'subscribers_count' => 'NumberOfLeads',
 			),
-			'subscriber' => array(
-				'name'      => 'FirstName',
-				'last_name' => 'LastName',
-				'email'     => 'Email',
+			'subscriber'        => array(
+				'name'          => 'FirstName',
+				'last_name'     => 'LastName',
+				'email'         => 'Email',
+				'custom_fields' => 'custom_fields',
+			),
+			'custom_field'      => array(
+				'field_id' => 'name',
+				'name'     => 'label',
+				'type'     => 'type',
+				'options'  => 'valueSet',
+			),
+			'custom_field_type' => array(
+				// Us => Them
+				'input'               => 'Text',
+				'textarea'            => 'TextArea',
+				'checkbox'            => 'MultiselectPicklist',
+				'select'              => 'Picklist',
+				// Them => Us
+				'Text'                => 'input',
+				'TextArea'            => 'textarea',
+				'MultiselectPicklist' => 'checkbox',
+				'Picklist'            => 'select',
 			),
 		);
 
-		return parent::get_data_keymap( $keymap, $custom_fields_key );
+		return parent::get_data_keymap( $keymap );
 	}
 
 	public function get_subscriber( $email ) {
@@ -190,7 +291,17 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 		if ( ! $subscriber_id ) {
 			$url                = "{$this->BASE_URL}/services/data/v39.0/sobjects/Lead";
 			$content            = $this->transform_data_to_provider_format( $args, 'subscriber' );
+			$content            = $this->_process_custom_fields( $content );
 			$content['Company'] = 'Bloom';
+			if ( isset( $content['custom_fields'] ) && is_array( $content['custom_fields'] ) ) {
+				$content = array_merge( $content, $content['custom_fields'] );
+				unset( $content['custom_fields'] );
+			}
+
+			// The LastName is required by Salesforce, whereas it is possible for Optin Form to not have the last name field.
+			if ( ! isset( $content['LastName'] ) || empty( $content['LastName'] ) ) {
+				$content['LastName'] = '[not provided]';
+			}
 
 			$this->prepare_request( $url, 'POST', false, json_encode( $content ), true );
 
@@ -235,29 +346,35 @@ class ET_Core_API_Email_SalesForce extends ET_Core_API_Email_Provider {
 		}
 
 		// Define SalesForce web-to-lead endpoint
-		$url = "https://www.salesforce.com/servlet/servlet.WebToLead?encoding=UTF-8";
+		$url  = 'https://webto.salesforce.com/servlet/servlet.WebToLead?encoding=UTF-8';
+		$args = $this->transform_data_to_provider_format( $args, 'subscriber' );
+		$args = $this->_process_custom_fields( $args );
 
 		// Prepare arguments for web-to-lead POST
 		$form_args = array(
 			'body' => array(
 				'oid'    => sanitize_text_field( $this->data['organization_id'] ),
 				'retURL' => esc_url( home_url( '/' ) ),
-				'email'  => sanitize_email( $args['email'] ),
+				'email'  => sanitize_email( $args['Email'] ),
 			),
 		);
 
-		if ( '' !== $args['name'] ) {
-			$form_args['body']['first_name'] = sanitize_text_field( $args['name'] );
+		if ( '' !== $args['FirstName'] ) {
+			$form_args['body']['first_name'] = sanitize_text_field( $args['FirstName'] );
 		}
 
-		if ( '' !== $args['last_name'] ) {
-			$form_args['body']['last_name'] = sanitize_text_field( $args['last_name'] );
+		if ( '' !== $args['LastName'] ) {
+			$form_args['body']['last_name'] = sanitize_text_field( $args['LastName'] );
+		}
+
+		if ( isset( $args['custom_fields'] ) && is_array( $args['custom_fields'] ) ) {
+			$form_args = array_merge( $form_args, $args['custom_fields'] );
 		}
 
 		// Post to SalesForce web-to-lead endpoint
-		$post = wp_remote_post( $url, $form_args );
+		$request = wp_remote_post( $url, $form_args );
 
-		if ( ! is_wp_error( $post ) ) {
+		if ( ! is_wp_error( $request ) && 200 === wp_remote_retrieve_response_code( $request ) ) {
 			return 'success';
 		}
 

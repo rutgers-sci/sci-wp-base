@@ -8,6 +8,12 @@
  * @package ET\Core\API
  */
 abstract class ET_Core_API_Service {
+
+	/**
+	 * @var ET_Core_Data_Utils
+	 */
+	protected static $_;
+
 	/**
 	 * URL to request an OAuth access token.
 	 *
@@ -127,6 +133,14 @@ abstract class ET_Core_API_Service {
 	public $http_auth = false;
 
 	/**
+	 * Maximum number of accounts user is allowed to add for the service.
+	 *
+	 * @since 4.0.7
+	 * @var int
+	 */
+	public $max_accounts;
+
+	/**
 	 * The service's proper name (will be shown in the UI).
 	 *
 	 * @since 1.1.0
@@ -217,7 +231,7 @@ abstract class ET_Core_API_Service {
 	 * @param string $api_key      The api key for the account. Optional (can be set after instantiation).
 	 */
 	public function __construct( $owner = 'ET_Core', $account_name = '', $api_key = '' ) {
-		$this->account_name   = sanitize_text_field( $account_name );
+		$this->account_name   = str_replace( '.', '', sanitize_text_field( $account_name ) );
 		$this->owner          = sanitize_text_field( $owner );
 		$this->account_fields = $this->get_account_fields();
 
@@ -225,8 +239,9 @@ abstract class ET_Core_API_Service {
 		$this->data_keys      = $this->get_data_keymap();
 		$this->oauth_verifier = '';
 
-		$this->http       = new ET_Core_HTTPInterface( $this->owner );
-		$this->data_utils = new ET_Core_Data_Utils();
+		$this->http = new ET_Core_HTTPInterface( $this->owner );
+
+		self::$_ = $this->data_utils = new ET_Core_Data_Utils();
 
 		$this->FAILURE_MESSAGE  = esc_html__( 'API request failed, please try again.', 'et_core' );
 		$this->API_KEY_REQUIRED = esc_html__( 'API request failed. API Key is required.', 'et_core' );
@@ -297,6 +312,12 @@ abstract class ET_Core_API_Service {
 			$this->data['refresh_token'] = $this->OAuth_Helper->token->refresh_token;
 		}
 
+		// If there an `instance_url` returned from the auth response, save it.
+		// Salesforce API should use this URL instead of the `login_url` provided by user.
+		if ( ! empty( $this->OAuth_Helper->INSTANCE_URL ) ) { // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change the prop name.
+			$this->data['instance_url'] = $this->OAuth_Helper->INSTANCE_URL; // @phpcs:ignore ET.Sniffs.ValidVariableName.UsedPropertyNotSnakeCase -- No need to change the prop name.
+		}
+
 		return true;
 	}
 
@@ -350,6 +371,8 @@ abstract class ET_Core_API_Service {
 	 * @return array|bool
 	 */
 	public function authenticate() {
+		et_core_nonce_verified_previously();
+
 		if ( '1.0a' === $this->oauth_version || ( '2.0' === $this->oauth_version && ! empty( $_GET['code'] ) ) ) {
 			$authenticated = $this->_do_oauth_access_token_request();
 
@@ -357,12 +380,13 @@ abstract class ET_Core_API_Service {
 				$this->save_data();
 				return true;
 			}
-		} else if ( '2.0' === $this->oauth_version ) {
-			$args = array(
+		} elseif ( '2.0' === $this->oauth_version ) {
+			$nonce = wp_create_nonce( 'et_core_api_service_oauth2' );
+			$args  = array(
 				'client_id'     => $this->data['api_key'],
 				'response_type' => 'code',
-				'state'         => rawurlencode( "ET_Core|{$this->name}|{$this->account_name}" ),
-				'redirect_uri'  => $this->REDIRECT_URL,
+				'state'         => rawurlencode( "ET_Core|{$this->slug}|{$this->account_name}|{$nonce}" ),
+				'redirect_uri'  => $this->REDIRECT_URL, // @phpcs:ignore -- No need to change the class property
 			);
 
 			$this->save_data();
@@ -395,8 +419,7 @@ abstract class ET_Core_API_Service {
 	 *
 	 * @since    1.1.0
 	 *
-	 * @param array  $keymap            A mapping of our data key addresses to those of the service, organized by type/category.
-	 * @param string $custom_fields_key The key under which custom fields are stored.
+	 * @param array $keymap A mapping of our data key addresses to those of the service, organized by type/category.
 	 *
 	 * @return array[] {
 	 *
@@ -408,7 +431,7 @@ abstract class ET_Core_API_Service {
 	 *    ...
 	 * }
 	 */
-	abstract public function get_data_keymap( $keymap = array(), $custom_fields_key = '' );
+	abstract public function get_data_keymap( $keymap = array() );
 
 	/**
 	 * Get error message for a response that has an ERROR status. If possible the provider's
@@ -496,14 +519,12 @@ abstract class ET_Core_API_Service {
 	 *
 	 * @return array
 	 */
-	public function transform_data_to_our_format( $data = array(), $key_type, $exclude_keys = array() ) {
+	public function transform_data_to_our_format( $data, $key_type, $exclude_keys = array() ) {
 		if ( ! isset( $this->data_keys[ $key_type ] ) ) {
 			return array();
 		}
 
-		$data_keys_mapping = $this->data_keys[ $key_type ];
-
-		return $this->data_utils->transform_data_to( 'our_data', $data, $data_keys_mapping, $exclude_keys );
+		return self::$_->array_transform( $data, $this->data_keys[ $key_type ], '<-', $exclude_keys );
 	}
 
 	/**
@@ -515,9 +536,11 @@ abstract class ET_Core_API_Service {
 	 *
 	 * @return array
 	 */
-	public function transform_data_to_provider_format( $data = array(), $key_type, $exclude_keys = array() ) {
-		$data_keys_mapping = $this->data_keys[ $key_type ];
+	public function transform_data_to_provider_format( $data, $key_type, $exclude_keys = array() ) {
+		if ( ! isset( $this->data_keys[ $key_type ] ) ) {
+			return array();
+		}
 
-		return $this->data_utils->transform_data_to( 'their_data', $data, $data_keys_mapping, $exclude_keys );
+		return self::$_->array_transform( $data, $this->data_keys[ $key_type ], '->', $exclude_keys );
 	}
 }

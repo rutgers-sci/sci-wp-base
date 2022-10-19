@@ -28,20 +28,20 @@
 		listen: function( $el ) {
 			var $this = this;
 
-			$el.find( '[data-et-core-portability-export]' ).click( function( e ) {
+			$el.find('[data-et-core-portability-export]').on('click', function(e){
 				e.preventDefault();
 
 				if ( ! $this.actionsDisabled() ) {
 					$this.disableActions();
 					$this.export();
 				}
-			} );
+			});
 
 
 			$el.find( '.et-core-portability-export-form input[type="text"]' ).on( 'keydown', function( e ) {
 				if ( 13 === e.keyCode ) {
 					e.preventDefault();
-					$el.find( '[data-et-core-portability-export]' ).click();
+					$el.find('[data-et-core-portability-export]').trigger('click');
 				}
 			} );
 
@@ -50,26 +50,26 @@
 				$this.populateImport( $( this ).get( 0 ).files[0] );
 			} );
 
-			$el.find( '.et-core-portability-import' ).click( function( e ) {
+			$el.find('.et-core-portability-import').on('click', function(e){
 				e.preventDefault();
 
 				if ( ! $this.actionsDisabled() ) {
 					$this.disableActions();
 					$this.import();
 				}
-			} );
+			});
 
 			// Trigger file window.
-			$el.find( '.et-core-portability-import-form button' ).click( function( e ) {
+			$el.find('.et-core-portability-import-form button').on('click', function(e){
 				e.preventDefault();
 				$this.instance( 'input[type="file"]' ).trigger( 'click' );
-			} );
+			});
 
 			// Cancel request.
-			$el.find( '[data-et-core-portability-cancel]' ).click( function( e ) {
+			$el.find('[data-et-core-portability-cancel]').on('click', function(e){
 				e.preventDefault();
 				$this.cancel();
-			} )
+			});
 		},
 
 		validateImportFile: function( file, noOutput ) {
@@ -95,19 +95,19 @@
 			$( '.et-core-portability-import-placeholder' ).text( file.name );
 		},
 
-		import: function( noBackup ) {
-			var $this = this,
-				file = $this.instance( 'input[type="file"]' ).get( 0 ).files[0];
+		import: function(noBackup) {
+			var $this = this;
+			var file = $this.instance('input[type="file"]').get(0).files[0];
 
-			if ( undefined === window.FormData ) {
-				etCore.modalContent( '<p>' + this.text.browserSupport + '</p>', false, 3000, '#et-core-portability-import' );
+			if (undefined === window.FormData) {
+				etCore.modalContent('<p>' + this.text.browserSupport + '</p>', false, 3000, '#et-core-portability-import');
 
 				$this.enableActions();
 
 				return;
 			}
 
-			if ( ! $this.validateImportFile( file ) ) {
+			if (!$this.validateImportFile(file)) {
 				return;
 			}
 
@@ -124,9 +124,12 @@
 				return;
 			}
 
+			var includeGlobalPresets = $this.instance('[name="et-core-portability-import-include-global-presets"]').is(':checked');
+
 			$this.ajaxAction( {
 				action: 'et_core_portability_import',
 				file: file,
+				include_global_presets: includeGlobalPresets,
 				nonce: $this.nonces.import
 			}, function( response ) {
 				etCore.modalContent( '<div class="et-core-loader et-core-loader-success"></div>', false, 3000, '#et-core-portability-import' );
@@ -147,9 +150,9 @@
 							if ( 'undefined' !== typeof window.tinyMCE && window.tinyMCE.get( 'content' ) && ! window.tinyMCE.get( 'content' ).isHidden() ) {
 								var editor = window.tinyMCE.get( 'content' );
 
-								editor.setContent( $.trim( response.data.postContent ), { format: 'html'  } );
+								editor.setContent(response.data.postContent.trim(), { format: 'html' });
 							} else {
-								$( '#content' ).val( $.trim( response.data.postContent ) );
+								$('#content').val(response.data.postContent.trim());
 							}
 
 							save.trigger( 'click' );
@@ -160,7 +163,7 @@
 						} else {
 							$( 'body' ).fadeOut( 500, function() {
 								// Remove confirmation popup before relocation.
-								$( window ).unbind( 'beforeunload' );
+								$( window ).off( 'beforeunload' );
 
 								window.location = window.location.href.replace(/reset\=true\&|\&reset\=true/,'');
 							} )
@@ -208,10 +211,13 @@
 					content = content.replace( /([^\]]*)$/, '' );
 				}
 
+				var applyGlobalPresets = $this.instance( '[name="et-core-portability-apply-presets"]' ).is( ':checked' );
+
 				$this.ajaxAction( {
 					action: 'et_core_portability_export',
 					content: content,
 					selection: $.isEmptyObject( posts ) ? false : JSON.stringify( posts ),
+					apply_global_presets: applyGlobalPresets,
 					nonce: $this.nonces.export
 				}, function( response ) {
 					var time = ' ' + new Date().toJSON().replace( 'T', ' ' ).replace( ':', 'h' ).substring( 0, 16 ),
@@ -228,7 +234,7 @@
 					} );
 
 					// Remove confirmation popup before relocation.
-					$( window ).unbind( 'beforeunload' );
+					$( window ).off( 'beforeunload' );
 
 					window.location.assign( encodeURI( downloadURL ) );
 
@@ -242,90 +248,142 @@
 			} );
 		},
 
-		exportFB: function( exportUrl, postId, content, fileName, importFile, page ) {
-			var $this = this;
+    exportFB: function(exportUrl, postId, content, fileName, importFile, page, timestamp, progress = 0, estimation = 1, layoutId = 0) {
+      var $this     = this;
+      var context   = layoutId !== 0 ? 'et_builder_layouts' : 'et_builder';
+      var selection = layoutId !== 0 ? JSON.stringify({'id': layoutId}) : false;
 
-			page = typeof page === 'undefined' ? 1 : page;
+      // Trigger event which updates VB-UI's progress bar
+      window.et_fb_export_progress   = progress;
+      window.et_fb_export_estimation = estimation;
 
-			$.ajax( {
-				type: 'POST',
-				url: etCore.ajaxurl,
-				dataType: 'json',
-				data: {
-					action: 'et_core_portability_export',
-					content: content,
-					timestamp: 0,
-					nonce: $this.nonces.export,
-					post: postId,
-					context: 'et_builder',
-					page: page,
-				},
-				success: function( response ) {
-					var errorEvent = document.createEvent( 'Event' );
+      var exportEvent = document.createEvent('Event');
+      exportEvent.initEvent('et_fb_layout_export_in_progress', true, true);
+      window.dispatchEvent(exportEvent);
 
-					errorEvent.initEvent( 'et_fb_layout_export_error', true, true );
+      page = typeof page === 'undefined' ? 1 : page;
 
-					// The error is unknown but most of the time it would be cased by the server max size being exceeded.
-					if ( 'string' === typeof response && '0' === response ) {
-						window.et_fb_export_layout_message = $this.text.maxSizeExceeded;
-						window.dispatchEvent( errorEvent );
+      $.ajax({
+        type: 'POST',
+        url: etCore.ajaxurl,
+        dataType: 'json',
+        data: {
+          action: 'et_core_portability_export',
+          content: content.shortcode,
+          global_presets: content.global_presets,
+          global_colors: content.global_colors,
+          timestamp: timestamp !== undefined ? timestamp : 0,
+          nonce: $this.nonces.export,
+          post: postId,
+          context: context,
+          selection: selection,
+          page: page,
+        },
+        success: function(response) {
+          var errorEvent = document.createEvent('Event');
 
-						return;
-					}
-					// Memory size set on server is exhausted.
-					else if ( 'string' === typeof response && response.toLowerCase().indexOf( 'memory size' ) >= 0 ) {
-						window.et_fb_export_layout_message = $this.text.memoryExhausted;
-						window.dispatchEvent( errorEvent );
-						return;
-					}
-					// Paginate.
-					else if ( 'undefined' !== typeof response.page ) {
-						if ( $this.cancelled ) {
-							return;
-						}
+          errorEvent.initEvent('et_fb_layout_export_error', true, true);
 
-						return $this.exportFB(exportUrl, postId, content, fileName, importFile, (page + 1));
-					} else if ( 'undefined' !== typeof response.data && 'undefined' !== typeof response.data.message ) {
-						window.et_fb_export_layout_message = $this.text[response.data.message];
-						window.dispatchEvent( errorEvent );
-						return;
-					}
+          // The error is unknown but most of the time it would be cased by the server max size being exceeded.
+          if ('string' === typeof response && '0' === response) {
+            window.et_fb_export_layout_message = $this.text.maxSizeExceeded;
+            window.dispatchEvent(errorEvent);
 
-					var time = ' ' + new Date().toJSON().replace( 'T', ' ' ).replace( ':', 'h' ).substring( 0, 16 ),
-						downloadURL = exportUrl,
-						query = {
-							'timestamp': response.data.timestamp,
-							'name': '' !== fileName ? fileName : encodeURIComponent( time ),
-						};
+            return;
+          }
+          // Memory size set on server is exhausted.
+          else if ('string' === typeof response && response.toLowerCase().indexOf('memory size') >= 0) {
+            window.et_fb_export_layout_message = $this.text.memoryExhausted;
+            window.dispatchEvent(errorEvent);
+            return;
+          }
+          // Paginate.
+          else if ('undefined' !== typeof response.page) {
+            if ($this.cancelled) {
+              return;
+            }
 
-					$.each( query, function( key, value ) {
-						if ( value ) {
-							downloadURL = downloadURL + '&' + key + '=' + value;
-						}
-					} );
+            // Update progress bar
+            var updatedProgress   = Math.ceil((response.page * 100) / response.total_pages);
+            var updatedEstimation = Math.ceil(((response.total_pages - response.page) * 6) / 60);
 
-					// Remove confirmation popup before relocation.
-					$( window ).unbind( 'beforeunload' );
+            // If progress param isn't empty, updated progress should continue from it
+            // because before exportFB(), shortcode should've been prepared via another
+            // ajax request first
+            if (0 < progress) {
+              const remainingProgress = (100 - updatedProgress) / 100;
+              updatedProgress = (updatedProgress * remainingProgress) + progress;
+            }
 
-					window.location.assign( encodeURI( downloadURL ) );
+            // Update global variables
+            window.et_fb_export_progress   = updatedProgress;
+            window.et_fb_export_estimation = updatedEstimation;
 
-					// perform import if needed
-					if ( typeof importFile !== 'undefined' ) {
-						$this.importFB( importFile, postId );
-					} else {
-						var event = document.createEvent( 'Event' );
+            // Dispatch event to trigger UI update
+            window.dispatchEvent(exportEvent);
 
-						event.initEvent( 'et_fb_layout_export_finished', true, true );
+            return $this.exportFB(
+              exportUrl,
+              postId,
+              content,
+              fileName,
+              importFile,
+              (page + 1),
+              response.timestamp,
+              updatedProgress,
+              updatedEstimation,
+              layoutId
+            );
+          } else if ('undefined' !== typeof response.data && 'undefined' !== typeof response.data.message) {
+            window.et_fb_export_layout_message = $this.text[response.data.message];
+            window.dispatchEvent(errorEvent);
+            return;
+          } else if (false === response.success) {
+            window.dispatchEvent(errorEvent);
+            return;
+          }
 
-						// trigger event to communicate with FB
-						window.dispatchEvent( event );
-					}
-				}
-			} );
-		},
+          var time = ' ' + new Date().toJSON().replace('T', ' ').replace(':', 'h').substring(0, 16),
+            downloadURL = exportUrl,
+            query = {
+              'timestamp': response.data.timestamp,
+              'name': '' !== fileName ? fileName : encodeURIComponent(time),
+            };
 
-		importFB: function( file, postId ) {
-			var $this = this;
+          $.each(query, function(key, value) {
+            if (value) {
+              downloadURL = downloadURL + '&' + key + '=' + value;
+            }
+          });
+
+          // Remove confirmation popup before relocation.
+          $(window).off('beforeunload');
+
+          // Update progress bar's global variables
+          window.et_fb_export_progress = 100;
+          window.et_fb_export_estimation = 0;
+
+          // Dispatch event to trigger UI update
+          window.dispatchEvent(exportEvent);
+          window.location.assign(encodeURI(downloadURL));
+
+          // perform import if needed
+          if (typeof importFile !== 'undefined') {
+            $this.importFB(importFile, postId);
+          } else {
+            var event = document.createEvent('Event');
+
+            event.initEvent('et_fb_layout_export_finished', true, true);
+
+            // trigger event to communicate with FB
+            window.dispatchEvent(event);
+          }
+        }
+      });
+    },
+
+		importFB: function(file, postId, options) {
+			var $this      = this;
 			var errorEvent = document.createEvent( 'Event' );
 
 			window.et_fb_import_progress = 0;
@@ -345,29 +403,58 @@
 				return;
 			}
 
+			if ('undefined' === typeof options) {
+				options = {};
+			}
+
+			options = $.extend({
+				replace: false,
+				context: 'et_builder',
+				returnJson: false,
+				useTempPresets: false,
+				includeGlobalPresets: false,
+			}, options);
+
 			var fileSize = Math.ceil( ( file.size / ( 1024 * 1024 ) ).toFixed( 2 ) ),
 				formData = new FormData(),
 				requestData = {
 					action: 'et_core_portability_import',
+					include_global_presets: options.includeGlobalPresets,
+					et_cloud_return_json: options.returnJson,
+					et_cloud_use_temp_presets: options.useTempPresets,
 					file: file,
 					content: false,
 					timestamp: 0,
 					nonce: $this.nonces.import,
 					post: postId,
-					context: 'et_builder'
+					replace: options.replace ? '1' : '0',
+					context: options.context
 				};
 
-			// Max size set on server is exceeded.
-			if ( fileSize >= $this.postMaxSize || fileSize >= $this.uploadMaxSize ) {
+			/**
+			 * Max size set on server is exceeded.
+			 *
+			 * 0 indicating "unlimited" according to php specs
+			 * https://www.php.net/manual/en/ini.core.php#ini.post-max-size
+			 **/
+			if (
+				( 0 > $this.postMaxSize && fileSize >= $this.postMaxSize )
+				|| ( 0 > $this.uploadMaxSize && fileSize >= $this.uploadMaxSize )
+			) {
 				window.et_fb_import_layout_message = this.text.maxSizeExceeded;
 				window.dispatchEvent( errorEvent );
-
 				return;
 			}
 
-			$.each( requestData, function( name, value ) {
-				formData.append( name, value);
-			} );
+			$.each(requestData, function(name, value) {
+				if ('file' === name) {
+				  // Explicitly set the file name.
+				  // Otherwise it'll be set to 'Blob' in case of Blob type, but we need actual filename here.
+				  formData.append('file', value, value.name);
+				} else {
+				  formData.append(name, value);
+				}
+			});
 
 			var importFBAjax = function( importData ) {
 				$.ajax( {
@@ -561,8 +648,16 @@
 				var fileSize = Math.ceil( ( data.file.size / ( 1024 * 1024 ) ).toFixed( 2 ) ),
 					formData = new FormData();
 
-				// Max size set on server is exceeded.
-				if ( fileSize >= $this.postMaxSize || fileSize >= $this.uploadMaxSize ) {
+				/**
+				 * Max size set on server is exceeded.
+				 *
+				 * 0 indicating "unlimited" according to php specs
+				 * https://www.php.net/manual/en/ini.core.php#ini.post-max-size
+				 **/
+				if (
+					( 0 > $this.postMaxSize && fileSize >= $this.postMaxSize )
+					|| ( 0 > $this.uploadMaxSize && fileSize >= $this.uploadMaxSize )
+				) {
 					etCore.modalContent( '<p>' + $this.text.maxSizeExceeded + '</p>', false, true, '#' + $this.instance( '.ui-tabs-panel:visible' ).attr( 'id' ) );
 
 					$this.enableActions();
@@ -592,7 +687,7 @@
 					wp.customize.unbind( 'saved', saveCallback );
 				}
 
-				$( '#save' ).click();
+				$('#save').trigger('click');
 
 				wp.customize.bind( 'saved', saveCallback );
 			} else {
@@ -661,7 +756,7 @@
 
 	} );
 
-	$( document ).ready( function() {
+	$(function() {
 		window.etCore.portability.boot();
 	});
 
